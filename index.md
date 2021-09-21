@@ -52,7 +52,7 @@ monkseal %>%
   geom_bar()
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-3-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-3-1.png)<!-- -->
 
 The sightings are done along the year (all years are pooled together). August gets maximum sightings.
 
@@ -64,7 +64,7 @@ monkseal %>%
   xlab('month')
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
 
 Regarding observers, sightings are mostly done by local people, then to a lesser extent tourists, spear gun fishers, professional fishermen and sailmen, port police and a few others. 
 
@@ -78,7 +78,7 @@ monkseal %>%
   labs(x = NULL, y = NULL)
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-5-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-5-1.png)<!-- -->
 
 Last, regarding where the seals were when they were spotted, we see that the sightings are mostly at sea (h), from human settlement (i) and on beach (f). 
 
@@ -92,7 +92,7 @@ monkseal %>%
   labs(x = NULL, y = NULL) 
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
 
 # Data mapping
 
@@ -139,7 +139,7 @@ ggplot() +
   xlab("") + ylab("")
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-7-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-7-1.png)<!-- -->
 
 And our grid (including a 20-km buffer around coastlines).
 
@@ -185,7 +185,7 @@ ggplot() +
   xlab("") + ylab("")
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-9-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-9-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map1.png"), dpi = 600)
@@ -510,7 +510,7 @@ occupancy2 %>%
   labs(x = 'Year', y = 'Number of occupied sites')
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-22-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-22-1.png)<!-- -->
 
 Now display local extinction, colonization and species detection probabilities estimates with credible intervals:
 
@@ -647,7 +647,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-26-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-26-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map2.png"), dpi = 600)
@@ -677,7 +677,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-27-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-27-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map3.png"), dpi = 600)
@@ -704,7 +704,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-28-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-28-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map4.png"), dpi = 600)
@@ -767,7 +767,7 @@ ggplot() +
   geom_sf(data = pa, colour = "red", fill = "transparent", lwd = 0.1) 
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-30-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-30-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpa.png"), dpi = 600)
@@ -787,7 +787,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-31-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-31-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonkseals.png"), dpi = 600)
@@ -844,7 +844,7 @@ ggplot() +
   theme(legend.position = "bottom")
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-34-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-34-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealsdetails.png"), dpi = 600)
@@ -869,7 +869,7 @@ monkseal %>%
   geom_bar()
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-36-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-36-1.png)<!-- -->
 
 The sightings are done along the year (all years are pooled together). October gets maximum sightings.
 
@@ -881,7 +881,7 @@ monkseal %>%
   xlab('month')
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-37-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-37-1.png)<!-- -->
 
 Regarding the observers, we see that the sightings are mostly done by local people, then to a lesser extent tourists, and a few others. 
 
@@ -896,7 +896,7 @@ monkseal %>%
   coord_flip()
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-38-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-38-1.png)<!-- -->
 
 Last, regarding where the seals were when they were spotted, we see that the sightings are mostly on beach (f). 
 
@@ -911,7 +911,7 @@ monkseal %>%
   coord_flip()
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-39-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-39-1.png)<!-- -->
 
 Map counts.
 
@@ -938,7 +938,7 @@ ggplot() +
   xlab("") + ylab("") 
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-40-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-40-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map1pups.png"),dpi=600)
@@ -1229,7 +1229,7 @@ occupancy2 %>%
   ylab('Number of occupied sites')
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-49-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-49-1.png)<!-- -->
 
 Now display local extinction, colonization and species detection probabilities estimates with credible intervals:
 
@@ -1366,7 +1366,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-53-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-53-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map2pups.png"),dpi=600)
@@ -1397,7 +1397,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-54-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-54-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map3pups.png"),dpi=600)
@@ -1424,7 +1424,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-55-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-55-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map4pups.png"),dpi=600)
@@ -1444,7 +1444,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-56-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-56-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealspups.png"),dpi=600)
@@ -1501,7 +1501,7 @@ ggplot() +
   theme(legend.position = "bottom")
 ```
 
-![](monkseal_occupancy_files/figure-html/unnamed-chunk-59-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-59-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealsdetailspups.png"),dpi=600)
