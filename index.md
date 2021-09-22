@@ -1,5 +1,5 @@
 ---
-title: "Distribution of Mediterranean Monk Seals in Greece using Occupancy Models"
+title: "Distribution of Mediterranean monk seals in Greece using occupancy models"
 author: "Olivier Gimenez"
 date: "September 2021"
 output:
@@ -26,11 +26,9 @@ Load all the packages we will need.
 library(tidyverse)
 library(lubridate)
 theme_set(theme_light())
-library(rnaturalearth)
 library(sf)
 library(viridis)
 library(gridExtra)
-library(gganimate)
 library(transformr)
 library(here)
 ```
@@ -135,8 +133,7 @@ coastlines <- st_read(here::here("shapefiles","coastlines.shp"))
 ggplot() + 
   geom_sf(data = greece) + 
   geom_sf(data = coastlines, color = 'red') + 
-  labs(title = 'Map of Greece and coastlines') +
-  xlab("") + ylab("")
+  labs(title = 'Map of Greece and coastlines', x = NULL, y = NULL)
 ```
 
 ![](index_files/figure-html/unnamed-chunk-7-1.png)<!-- -->
@@ -158,7 +155,16 @@ grid <- st_read(here::here("shapefiles","grid.shp"))
 ## Projected CRS: GGRS87 / Greek Grid
 ```
 
-A few sites are really small, more precisely 0 percent of the 3016 (i.e. 166 sites) are less than $10km^2$.
+```r
+ggplot() + 
+  geom_sf(data = greece) + 
+  geom_sf(data = grid, lwd = 0.1) + 
+  labs(title = 'Gridded map of Greece', x = NULL, y = NULL)
+```
+
+![](index_files/figure-html/unnamed-chunk-8-1.png)<!-- -->
+
+Note that a few sites are small, more precisely 0 percent of the 3016 (i.e. 166 sites) are less than $10km^2$.
 
 Get all sightings and map them:
 
@@ -181,8 +187,7 @@ ggplot() +
     name = 'counts',
     values = bwr(5),
     guide = guide_legend(reverse = TRUE)) + 
-  labs(title = '') +
-  xlab("") + ylab("")
+  labs(title = '', x = NULL, y = NULL)
 ```
 
 ![](index_files/figure-html/unnamed-chunk-9-1.png)<!-- -->
@@ -199,9 +204,9 @@ Prepare the data.
 
 ```r
 grid <- grid %>% 
-  filter(as.numeric(areakm2)>10) # filter out very small sites
+  filter(as.numeric(areakm2)>10) # filter out small sites
 mm <- c('Mar','Apr','May','Jun','Jul','Aug','Sep','Oct') # extract month with data
-indyear <- c(2000,2001,2002,2003,2004,2005,2006,2007,2013,2014,2015,2016,2017,2018,2019, 2020) # define two periods
+indyear <- c(2000:2007, 2013:2020) # define two periods
 ids <- unique(grid$UTM_NAME)
 mom_detections <- list()
 for (k in 1:length(indyear)){
@@ -390,7 +395,10 @@ win.data <- list(y = y, nsite = dim(y)[1], nyear = dim(y)[2], offset = offset)
 
 # initial values
 zst <- cbind(as.numeric(y1 > 0), as.numeric(y2 > 0)) # observed occurrence as inits for z 
-inits <- function() {list(z = zst, sdp = runif(1,1,9), sdgam = runif(1,1,9), sdeps = runif(1,1,9))}
+inits <- function() {list(z = zst, 
+                          sdp = runif(1,1,9), 
+                          sdgam = runif(1,1,9), 
+                          sdeps = runif(1,1,9))}
 
 # parameters monitored
 params <- c("psi","sdgam","sdeps","sdp","mup","lp","mugam","lgam","mueps","leps","z")
@@ -406,7 +414,13 @@ Run JAGS from R:
 ```r
 library(R2jags)
 ptm <- proc.time()
-out <- jags(data = win.data, inits = inits, parameters.to.save = params, model.file = here::here("codes","dynoccct.jags"), n.chains = nc, n.iter = ni, n.burnin = nb)
+out <- jags(data = win.data, 
+            inits = inits, 
+            parameters.to.save = params, 
+            model.file = here::here("codes","dynoccct.jags"), 
+            n.chains = nc, 
+            n.iter = ni, 
+            n.burnin = nb)
 x <- proc.time() -  ptm
 save(out, x, file = here::here("models","monksealscloglog.RData"))
 ```
@@ -417,24 +431,17 @@ The code above takes some time to run. I run it once, saved the results and use 
 load(here::here("models","monksealscloglog.RData"))
 ```
 
-Check convergence
-
-```r
-traceplot(out,ask=T)
-```
-                                                   
-Posterior densities:
-
-```r
-library(lattice)
-jagsfit.mcmc <- as.mcmc(out)
-densityplot(jagsfit.mcmc)
-```
-
 Print results:
 
 ```r
-print(out,digits = 2)
+out$BUGSoutput$sims.matrix %>%
+  as_tibble() %>%
+  pivot_longer(cols = everything(),  values_to = "value", names_to = "parameter") %>%
+  filter(str_detect(parameter, "mu") | str_detect(parameter, "sd")) %>%
+  group_by(parameter) %>%
+  summarize(median = median(value),
+            lci = quantile(value, probs = 2.5/100),
+            uci = quantile(value, probs = 97.5/100))
 ```
 
 ## Post-process results
@@ -510,7 +517,7 @@ occupancy2 %>%
   labs(x = 'Year', y = 'Number of occupied sites')
 ```
 
-![](index_files/figure-html/unnamed-chunk-22-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-20-1.png)<!-- -->
 
 Now display local extinction, colonization and species detection probabilities estimates with credible intervals:
 
@@ -647,7 +654,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](index_files/figure-html/unnamed-chunk-26-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-24-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map2.png"), dpi = 600)
@@ -677,7 +684,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](index_files/figure-html/unnamed-chunk-27-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-25-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map3.png"), dpi = 600)
@@ -704,7 +711,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](index_files/figure-html/unnamed-chunk-28-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-26-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map4.png"), dpi = 600)
@@ -767,7 +774,7 @@ ggplot() +
   geom_sf(data = pa, colour = "red", fill = "transparent", lwd = 0.1) 
 ```
 
-![](index_files/figure-html/unnamed-chunk-30-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-28-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpa.png"), dpi = 600)
@@ -787,28 +794,13 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](index_files/figure-html/unnamed-chunk-31-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-29-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonkseals.png"), dpi = 600)
 ```
 
-In total, we have this number of cells of high probability of occurrence of monk seals pups.
-
-```r
-ring_occ %>%
-  filter(z_occupied == 'used') %>%
-  filter(yearr == '2013-2020') %>%
-  count()
-```
-
-<div data-pagedtable="false">
-  <script data-pagedtable-source type="application/json">
-{"columns":[{"label":[""],"name":["_rn_"],"type":[""],"align":["left"]},{"label":["n"],"name":[1],"type":["int"],"align":["right"]},{"label":["geometry"],"name":[2],"type":["s_MULTIP"],"align":["right"]}],"data":[{"1":"448","2":"<s_MULTIP>","_rn_":"1"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
-  </script>
-</div>
-
-Of which, this number intersects with marine protected areas.
+Out of the total number of cells with high probability of occurrence of monk seals, this number intersects with marine protected areas.
 
 ```r
 mask <- ring_occ %>%
@@ -844,7 +836,7 @@ ggplot() +
   theme(legend.position = "bottom")
 ```
 
-![](index_files/figure-html/unnamed-chunk-34-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-31-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealsdetails.png"), dpi = 600)
@@ -869,7 +861,7 @@ monkseal %>%
   geom_bar()
 ```
 
-![](index_files/figure-html/unnamed-chunk-36-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-33-1.png)<!-- -->
 
 The sightings are done along the year (all years are pooled together). October gets maximum sightings.
 
@@ -878,10 +870,10 @@ monkseal %>%
   ggplot() +
   aes(x = factor(month)) + 
   geom_bar() + 
-  xlab('month')
+  labs(x = NULL)
 ```
 
-![](index_files/figure-html/unnamed-chunk-37-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-34-1.png)<!-- -->
 
 Regarding the observers, we see that the sightings are mostly done by local people, then to a lesser extent tourists, and a few others. 
 
@@ -890,13 +882,12 @@ monkseal %>%
   filter(!is.na(observer)) %>%
   count(observer) %>%
   ggplot() +
-  aes(x = fct_reorder(observer, n), y = n) %>%
+  aes(x = n, y = fct_reorder(observer, n)) %>%
   geom_col() +
-  xlab('') + 
-  coord_flip()
+  labs(y = NULL, x = NULL)
 ```
 
-![](index_files/figure-html/unnamed-chunk-38-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-35-1.png)<!-- -->
 
 Last, regarding where the seals were when they were spotted, we see that the sightings are mostly on beach (f). 
 
@@ -905,13 +896,12 @@ monkseal %>%
   filter(!is.na(where)) %>%
   count(where) %>%
   ggplot() +
-  aes(x = fct_reorder(where, n), y = n) %>%
+  aes(x = n, y = fct_reorder(where, n)) %>%
   geom_col() +
-  xlab('') + 
-  coord_flip()
+  labs(y = NULL, x = NULL)
 ```
 
-![](index_files/figure-html/unnamed-chunk-39-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-36-1.png)<!-- -->
 
 Map counts.
 
@@ -934,11 +924,10 @@ ggplot() +
     name = 'counts',
     values = bwr(5),
     guide = guide_legend(reverse = TRUE)) + 
-  labs(title = '') +
-  xlab("") + ylab("") 
+  labs(title = '', x = NULL, y = NULL)
 ```
 
-![](index_files/figure-html/unnamed-chunk-40-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-37-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map1pups.png"),dpi=600)
@@ -948,7 +937,7 @@ Format data for occupancy analyses.
 
 ```r
 mm <- c('Sep','Oct','Nov','Dec','Jan') # extract data
-indyear <- c(2000,2001,2002,2003,2004,2005,2006,2007,2013,2014,2015,2016,2017,2018,2019,2020)
+indyear <- c(2000:2007,2013:2020)
 ids <- unique(grid$UTM_NAME)
 mom_detections <- list()
 for (k in 1:length(indyear)){
@@ -1160,6 +1149,25 @@ The code above takes some time to run. I run it once, saved the results and use 
 load(here::here("models","monksealscloglogpups.RData"))
 ```
 
+Print results:
+
+```r
+out$BUGSoutput$sims.matrix %>%
+  as_tibble() %>%
+  pivot_longer(cols = everything(),  values_to = "value", names_to = "parameter") %>%
+  filter(str_detect(parameter, "mu") | str_detect(parameter, "sd")) %>%
+  group_by(parameter) %>%
+  summarize(median = median(value),
+            lci = quantile(value, probs = 2.5/100),
+            uci = quantile(value, probs = 97.5/100))
+```
+
+<div data-pagedtable="false">
+  <script data-pagedtable-source type="application/json">
+{"columns":[{"label":["parameter"],"name":[1],"type":["chr"],"align":["left"]},{"label":["median"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["lci"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["uci"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"mueps","2":"-5.5950174","3":"-7.2732139","4":"-3.9574104"},{"1":"mugam","2":"-8.4367923","3":"-8.8923235","4":"-8.0828033"},{"1":"mup[1]","2":"0.5548282","3":"0.5019821","4":"0.7028742"},{"1":"mup[2]","2":"0.5301337","3":"0.5011134","4":"0.6621112"},{"1":"sdeps","2":"5.4975337","3":"1.1358573","4":"9.7700302"},{"1":"sdgam","2":"0.6168601","3":"0.1753570","4":"1.1017624"},{"1":"sdp","2":"2.2965259","3":"1.7566458","4":"2.8896571"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+  </script>
+</div>
+
 Check out the number of occupied UTM squares by the species over time. First the naive occupancy, that is the number of sites that were observed occupied over the two periods:
 
 ```r
@@ -1229,7 +1237,7 @@ occupancy2 %>%
   ylab('Number of occupied sites')
 ```
 
-![](index_files/figure-html/unnamed-chunk-49-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-47-1.png)<!-- -->
 
 Now display local extinction, colonization and species detection probabilities estimates with credible intervals:
 
@@ -1357,8 +1365,7 @@ ggplot() +
     name = 'Pr(occupancy)', 
     direction = -1,
     alpha = 0.7) + 
-  labs(title = '') +
-  xlab("") + ylab("") + 
+  labs(title = '', x = NULL, y = NULL) +
   facet_wrap(~ yearr, ncol = 2) + 
   theme(legend.position = 'bottom', 
         legend.title = element_text(size=8), 
@@ -1366,7 +1373,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](index_files/figure-html/unnamed-chunk-53-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-51-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map2pups.png"),dpi=600)
@@ -1392,12 +1399,12 @@ ggplot() +
     geom_sf(data = greece, colour = "grey50", fill = "white",lwd = 0.2) + 
     scale_fill_manual(values = c('white','blue'),
                     name = "Site is") + 
-  xlab("") + ylab("") +
+  labs(x = NULL, y = NULL) +
   facet_wrap(~ yearr, ncol = 2) + 
   theme(legend.position = "none")
 ```
 
-![](index_files/figure-html/unnamed-chunk-54-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-52-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map3pups.png"),dpi=600)
@@ -1416,15 +1423,14 @@ ggplot() +
   geom_sf(data = greece, colour = "grey50", fill = "white",lwd = 0.2) + 
   scale_fill_gradientn(colours = RColorBrewer::brewer.pal(15,"RdYlGn"),
                        name = '') + 
-  labs(title = '') +
-  xlab("") + ylab("") + 
+  labs(title = '', x = NULL, y = NULL) + 
   theme(legend.position = 'bottom', 
         legend.title = element_text(size=8), 
         legend.text = element_text(size=8),
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](index_files/figure-html/unnamed-chunk-55-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-53-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map4pups.png"),dpi=600)
@@ -1444,28 +1450,13 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](index_files/figure-html/unnamed-chunk-56-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-54-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealspups.png"),dpi=600)
 ```
 
-In total, we have this number of cells of high probability of occurrence of monk seals pups.
-
-```r
-ring_occ %>%
-  filter(z_occupied == 'used') %>%
-  filter(yearr == '2013-2020') %>%
-  count()
-```
-
-<div data-pagedtable="false">
-  <script data-pagedtable-source type="application/json">
-{"columns":[{"label":[""],"name":["_rn_"],"type":[""],"align":["left"]},{"label":["n"],"name":[1],"type":["int"],"align":["right"]},{"label":["geometry"],"name":[2],"type":["s_MULTIP"],"align":["right"]}],"data":[{"1":"84","2":"<s_MULTIP>","_rn_":"1"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
-  </script>
-</div>
-
-Of which, this number intersects with marine protected areas.
+Out of the total number of cells with high probability of occurrence of monk seals pups, this number intersects with marine protected areas.
 
 ```r
 mask <- ring_occ %>%
@@ -1501,7 +1492,7 @@ ggplot() +
   theme(legend.position = "bottom")
 ```
 
-![](index_files/figure-html/unnamed-chunk-59-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-56-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealsdetailspups.png"),dpi=600)
