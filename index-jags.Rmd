@@ -136,7 +136,7 @@ ggsave(here::here("figures","map1.png"), dpi = 600)
 
 ## Data formating
 
-Prepare the data:
+Prepare the data.
 ```{r}
 grid <- grid %>% 
   filter(as.numeric(areakm2)>10) # filter out small sites
@@ -189,133 +189,108 @@ range(y)
 
 ## Inference
 
-Load `nimble` package:
+We now specify our model in BUGS language:
 ```{r}
-library(nimble)
-```
+sink(here::here("codes","dynoccct.jags"))
+cat("
+model{
 
-We specify our model:
-```{r}
-model <- nimbleCode({
+# Specify priors
+mupsi ~ dnorm(-5,1)
+for(i in 1:nsite){
+cloglog(psi[i]) <- mupsi + offset[i]
+}
 
-  # occupancy
-  mupsi ~ dnorm(-5,sd = 1)
-  for(i in 1:nsite){
-    cloglog(psi[i]) <- mupsi + offset[i]
-  }
+sdgam ~ dunif(0,3)
+taugam <- pow(sdgam,-1)
+sdeps ~ dunif(0,3)
+taueps <- pow(sdeps,-1)
+sdp ~ dunif(0,10)
+taup <- pow(sdp,-2)
 
-  # detection
-  sdp ~ dunif(0,10)
-  for(i in 1:nyear){
-    muptemp[i] ~ dunif(0,1)
-    logit(mup[i]) <- muptemp[i]
-  }
-  for(i in 1:nsite){
-    lp[i] ~ dnorm(0, sd = sdp)
-    for(t in 1:nyear){
-      logit(p[i,t]) <- mup[t] + lp[i]
-    }
-  }
-  
-  # priors for mean extinction/colonization
-  # preliminary analyses show no heterogeneity in these parameters
-  mueps ~ dnorm(-5, sd = 1)
-  mugam ~ dnorm(-5, sd = 1)
-  
-  # process model
-  for(i in 1:nsite){
-    z[i,1] ~ dbern(psi[i])
-    cloglog(gamma[i]) <- mugam + offset[i]
-    cloglog(eps[i]) <- mueps + offset[i]
-    z[i,2] ~ dbern(z[i,1] * (1 - eps[i]) + (1 - z[i,1]) * gamma[i])
-  }
-  
-  # observation model
-  for (i in 1:nsite){
-    for (k in 1:nyear){
-      y[i,k] ~ dbin(z[i,k] * p[i,k],8)
-    }
-  }
-})
+for(i in 1:nyear){
+    mup.prob[i] ~ dunif(0,1)
+    logit(mup[i]) <- mup.prob[i]
+}
+
+for(i in 1:nsite){
+    lp[i] ~ dnorm(0,taup)
+        for(t in 1:nyear){
+            logit(p[i,t]) <- mup[t] + lp[i]
+      }
+}
+
+mueps ~ dnorm(-5,1)
+mugam ~ dnorm(-5,1)
+
+# Ecological submodel: Define state conditional on parameters
+for(i in 1:nsite){
+   z[i,1] ~ dbern(psi[i])
+   leps[i] ~ dnorm(0,1)
+   lgam[i] ~ dnorm(0,1)
+   cloglog(gamma[i]) <- mugam + taugam * lgam[i] + offset[i]
+   cloglog(eps[i]) <- mueps + taueps * leps[i] + offset[i]
+   muZ[i,2] <- z[i,1] * (1-eps[i]) + (1-z[i,1]) * gamma[i]
+   z[i,2] ~ dbern(muZ[i,2])
+}
+
+# Observation model
+for (i in 1:nsite){
+		for (k in 1:nyear){
+			y[i,k] ~ dbin(muy[i,k],8)
+			muy[i,k] <- z[i,k]*p[i,k]
+		} #k
+} #i
+
+}
+", fill = TRUE)
+sink()
 ```
 
 Specify data, initial values, parameters to be monitored and various MCMC details:
 ```{r}
 # data
 offset <- log(as.numeric(grid$areakm2))
-win.data <- list(y = y)
-win.constants <- list(nsite = dim(y)[1], 
-                      nyear = dim(y)[2], 
-                      offset = offset)
+win.data <- list(y = y, nsite = dim(y)[1], nyear = dim(y)[2], offset = offset)
 
 # initial values
 zst <- cbind(as.numeric(y1 > 0), as.numeric(y2 > 0)) # observed occurrence as inits for z 
 inits <- function() {list(z = zst, 
-                          mueps = -4, 
-                          mugam = -4, 
-                          mupsi = -4,
                           sdp = runif(1,1,9), 
-                          muptemp = rep(0,dim(y)[1]),
-                          eps = rep(0.5,dim(y)[1]),
-                          gamma = rep(0.5,dim(y)[1]),
-                          psi = rep(0.5,dim(y)[1]),
-                          lp = rep(0,dim(y)[1]),
-                          mup = rep(0,dim(y)[2]))}
+                          sdgam = runif(1,0.1,2.5), 
+                          sdeps = runif(1,0.1,2.5))}
+
+# parameters monitored
+params <- c("psi","mupsi","sdgam","sdeps","sdp","mup","lp","mugam","lgam","mueps","leps","z")
 
 # MCMC settings
 ni <- 15000
 nb <- 5000
 nc <- 2
+ni <- 250
+nb <- 50
+nc <- 2
 ```
 
-Create model as a R object: 
-```{r}
-survival <- nimbleModel(code = model,
-                        data = win.data,
-                        constants = win.constants,
-                        inits = inits(),
-                        calculate = FALSE)
-#survival$initializeInfo()
-#survival$calculate()
-```
-
-Go through `nimble` workflow:
-```{r}
-# compile model
-Csurvival <- compileNimble(survival)
-
-# create a MCMC configuration
-survivalConf <- configureMCMC(survival, 
-                              useConjugacy = FALSE)
-
-# replace RW samplers by slice sampler for standard deviation of random effects on detection
-survivalConf$removeSamplers(c('sdp'))
-survivalConf$addSampler(target = c('sdp'),
-                        type = 'slice')
-
-# add some parameters to monitor
-survivalConf$addMonitors(c("lp","z","mupsi","mup"))
-
-# create MCMC function and compile it
-survivalMCMC <- buildMCMC(survivalConf)
-CsurvivalMCMC <- compileNimble(survivalMCMC, project = survival)
-```
-
-Run `nimble`:
-```{r eval=TRUE}
+Run JAGS from R:
+```{r eval=FALSE}
+library(R2jags)
 ptm <- proc.time()
-out <- runMCMC(mcmc = CsurvivalMCMC, 
-               niter = ni,
-               nburnin = nb,
-               nchains = nc)
+out <- jags(data = win.data, 
+            inits = inits, 
+            parameters.to.save = params, 
+            model.file = here::here("codes","dynoccct.jags"), 
+            n.chains = nc, 
+            n.iter = ni, 
+            n.burnin = nb,
+            n.thin = 1)
 x <- proc.time() -  ptm
-save(out, x, file = here::here("models","monksealscloglog-nimble.RData"))
+save(out, x, file = here::here("models","monksealscloglog.RData"))
 ```
 
-The code above takes some time to run. I ran it, saved the results and use them from here:
+The code above takes some time to run. I run it once, saved the results and use them from here:
 ```{r}
-load(here::here("models","monksealscloglog-nimble.RData"))
-out_backup <- out
+load(here::here("models","monksealscloglog.RData"))
 ```
 
 Check convergence:
@@ -326,18 +301,154 @@ MCMCtrace(object = out,
           ind = TRUE,
           Rhat = TRUE, # add Rhat
           n.eff = TRUE, # add eff sample size
-          params = c("mupsi","sdp",
+          params = c("sdgam","sdeps","sdp",
                      "mup","mugam","mueps"))
 ```
 
+OK, random effects on extinction/col are not needed, also we add CAR on occupancy. 
+
+We now specify our model in BUGS language:
+```{r}
+sink(here::here("codes","dynocc.jags"))
+cat("
+model{
+
+# Specify priors for occupancy
+mupsi ~ dnorm(-5,1)
+tau ~ dunif(0,10)#dgamma(2,2) 
+alpha ~ dunif(0,1)#1	    	
+
+# Occupancy
+for(i in 1:nsite){
+cloglog(psi[i]) <- mupsi + phi[i] + offset[i]
+mu[i] <- 0
+}
+# CAR
+inv.c[1:nsite,1:nsite] <- tau * (D[1:nsite,1:nsite] - alpha * W[1:nsite,1:nsite])
+phi[1:nsite] ~ dmnorm(mu[1:nsite],inv.c[1:nsite,1:nsite])
+
+# Specify priors for detection
+sdp ~ dunif(0,10)
+taup <- pow(sdp,-2)
+for(i in 1:nyear){
+    mup.prob[i] ~ dunif(0,1)
+    logit(mup[i]) <- mup.prob[i]
+}
+# Detection
+for(i in 1:nsite){
+    lp[i] ~ dnorm(0,taup)
+        for(t in 1:nyear){
+            logit(p[i,t]) <- mup[t] + lp[i]
+      }
+}
+
+# prior
+mueps ~ dnorm(-5,1)
+mugam ~ dnorm(-5,1)
+
+# Dynamic state model
+for(i in 1:nsite){
+   z[i,1] ~ dbern(psi[i])
+   leps[i] ~ dnorm(0,1)
+   lgam[i] ~ dnorm(0,1)
+   cloglog(gamma[i]) <- mugam + offset[i]
+   cloglog(eps[i]) <- mueps + offset[i]
+   muZ[i,2] <- z[i,1] * (1-eps[i]) + (1-z[i,1]) * gamma[i]
+   z[i,2] ~ dbern(muZ[i,2])
+}
+
+# Observation model
+for (i in 1:nsite){
+		for (k in 1:nyear){
+			y[i,k] ~ dbin(muy[i,k],8)
+			muy[i,k] <- z[i,k]*p[i,k]
+		} #k
+} #i
+
+}
+", fill = TRUE)
+sink()
+```
+
+Specify data, initial values, parameters to be monitored and various MCMC details:
+```{r}
+# spatial ingredients
+neighbours <- spdep::poly2nb(pl = grid)
+#plot(grid,border="grey")
+#plot(neighbours,spdep::coordina(grid),pch=16,add=TRUE)
+# proximity matrix
+weights <- spdep::nb2mat(neighbours,style="B")
+
+# alpha = 1/max(eigen(weights)$values)
+# tau2 = 1
+# P = (diag(rowSums(weights)) - alpha * weights)/tau2
+## Is P valid?
+# library(MASS)
+# Sigma = chol2inv(P)
+# mvrnorm(n=1,mu=rep(0,dim(Sigma)[1]),Sigma=Sigma) #Useful for simulations later on
+
+# data
+offset <- log(as.numeric(grid$areakm2))
+win.data <- list(y = y, 
+                 nsite = dim(y)[1], 
+                 nyear = dim(y)[2], 
+                 offset = offset,
+                 D = diag(rowSums(weights)),
+                 W = weights)
+
+# initial values
+zst <- cbind(as.numeric(y1 > 0), as.numeric(y2 > 0)) # observed occurrence as inits for z 
+inits <- function() {list(z = zst, 
+                          sdp = runif(1,1,9))}
+
+# parameters monitored
+params <- c("psi","mupsi","sdp","mup","lp","mugam","lgam","mueps","leps","z","alpha","tau")
+
+# MCMC settings
+ni <- 1500
+nb <- 500
+nc <- 2
+```
+
+Run JAGS from R:
+```{r eval=FALSE}
+library(R2jags)
+ptm <- proc.time()
+out <- jags(data = win.data, 
+            inits = inits, 
+            parameters.to.save = params, 
+            model.file = here::here("codes","dynocc.jags"), 
+            n.chains = nc, 
+            n.iter = ni, 
+            n.burnin = nb,
+            n.thin = 1)
+x <- proc.time() -  ptm
+save(out, x, file = here::here("models","monksealscloglogspatial.RData"))
+```
+
+The code above takes some time to run. I run it once, saved the results and use them from here:
+```{r}
+load(here::here("models","monksealscloglogspatial.RData"))
+```
+
+Check convergence:
+```{r}
+library(MCMCvis)
+MCMCtrace(object = out,
+          pdf = FALSE,
+          ind = TRUE,
+          Rhat = TRUE, # add Rhat
+          n.eff = TRUE, # add eff sample size
+          params = c("sdp","mup","mugam","mueps"))
+```
+
+
 Print results:
-```{r, eval = TRUE}
-out <- rbind(out$chain1, out$chain2)
-out %>%
+```{r, eval = FALSE}
+out$BUGSoutput$sims.matrix %>%
   as_tibble() %>%
   pivot_longer(cols = everything(),  values_to = "value", names_to = "parameter") %>%
   filter(str_detect(parameter, "mu") | str_detect(parameter, "sd")) %>%
-  filter(str_detect(parameter, "muptemp", negate = TRUE)) %>%
   group_by(parameter) %>%
   summarize(median = median(value),
             lci = quantile(value, probs = 2.5/100),
@@ -357,10 +468,7 @@ naiveocc
 
 Now the estimated occupancy:
 ```{r}
-zzz <- out[,grepl("z", colnames(out))]
-zz <- array(NA, dim = c(nrow(zzz), ncol(zzz)/2, 2))
-zz[,,1] <- zzz[1:nrow(zzz),1:(ncol(zzz)/2)]
-zz[,,2] <- zzz[1:nrow(zzz),(ncol(zzz)/2+1):ncol(zzz)]
+zz <- out$BUGSoutput$sims.list$z
 dim(zz) # 2000 x 2850 x 2 (nbMCMC x nSquares x nyears)
 nbpixocc <- apply(zz,c(1,3),sum) # 2000 x 2
 meannbpixocc <- apply(nbpixocc,2,median)
@@ -401,20 +509,19 @@ occupancy2 %>%
 
 Now display local extinction, colonization and species detection probabilities estimates with credible intervals:
 ```{r}
-epsmean <- icloglog(mean(out[,'mueps']) + mean(offset))
-epsql <- icloglog(mean(out[,'mueps']) + mean(offset) - 2*sd(out[,'mueps']))
-epsqu <- icloglog(mean(out[,'mueps']) + mean(offset) + 2*sd(out[,'mueps']))
+#install.packages("remotes")
+#remotes::install_github("mikemeredith/MMmisc")
+epsmean <- MMmisc::invcloglog(out$BUGSoutput$mean$mueps + mean(offset))
+epsql <- MMmisc::invcloglog(out$BUGSoutput$mean$mueps + mean(offset) - 2*out$BUGSoutput$sd$mueps)
+epsqu <- MMmisc::invcloglog(out$BUGSoutput$mean$mueps + mean(offset) + 2*out$BUGSoutput$sd$mueps)
 
-gammean <- icloglog(mean(out[,'mugam']) + mean(offset))
-gamql <- icloglog(mean(out[,'mugam']) + mean(offset) - 2*sd(out[,'mugam']))
-gamqu <- icloglog(mean(out[,'mugam']) + mean(offset) + 2*sd(out[,'mugam']))
+gammean <- MMmisc::invcloglog(out$BUGSoutput$mean$mugam + mean(offset))
+gamql <- MMmisc::invcloglog(out$BUGSoutput$mean$mugam + mean(offset) - 2*out$BUGSoutput$sd$mugam)
+gamqu <- MMmisc::invcloglog(out$BUGSoutput$mean$mugam + mean(offset) + 2*out$BUGSoutput$sd$mugam)
 
-pmean1 <- plogis(mean(out[,'mup[1]']))
-pmean2 <- plogis(mean(out[,'mup[2]']))
-pqu1 <- plogis(mean(out[,'mup[1]']) + 2*sd(out[,'mup[1]']))
-pql1 <- plogis(mean(out[,'mup[1]']) - 2*sd(out[,'mup[1]']))
-pqu2 <- plogis(mean(out[,'mup[2]']) + 2*sd(out[,'mup[2]']))
-pql2 <- plogis(mean(out[,'mup[2]']) - 2*sd(out[,'mup[2]']))
+pmean <- plogis(out$BUGSoutput$mean$mup)
+pqu <- plogis(out$BUGSoutput$mean$mup + 2*out$BUGSoutput$sd$mup)
+pql <- plogis(out$BUGSoutput$mean$mup - 2*out$BUGSoutput$sd$mup)
 
 eps <- data.frame(
   param = epsmean, 
@@ -427,9 +534,9 @@ gam <- data.frame(
   qup = gamqu)
 
 det <- data.frame(period = c(1,2),
-  param = c(pmean1,pmean2),
-  qlo = c(pql1,pql2),
-  qup = c(pqu1,pqu2))
+  param = pmean,
+  qlo = pql,
+  qup = pqu)
 
 eps
 gam
@@ -438,10 +545,7 @@ det
 
 Let's map the estimated distribution of monk seals. First, compute realized occupancy per site and per period, and put altogether in a big table:
 ```{r}
-zzz <- out[,grepl("z", colnames(out))]
-zz <- array(NA, dim = c(nrow(zzz), ncol(zzz)/2, 2))
-zz[,,1] <- zzz[1:nrow(zzz),1:(ncol(zzz)/2)]
-zz[,,2] <- zzz[1:nrow(zzz),(ncol(zzz)/2+1):ncol(zzz)]
+zz <- out$BUGSoutput$sims.list$z # 2000 x 2850 x 2 (nbMCMC x nSquares x nyears)
 meanz <- apply(zz,c(2,3),mean)
 dim(meanz)
 toplot <- data.frame(
@@ -481,10 +585,7 @@ ggsave(here::here("figures","map2.png"), dpi = 600)
 
 We'd also like to have two maps of the estimated occupied sites for the two periods. To do so, we say that all squares with prob of occupancy greater than $25\%$ are occupied. This gives the following maps: 
 ```{r}
-zzz <- out[,grepl("z", colnames(out))]
-zz <- array(NA, dim = c(nrow(zzz), ncol(zzz)/2, 2))
-zz[,,1] <- zzz[1:nrow(zzz),1:(ncol(zzz)/2)]
-zz[,,2] <- zzz[1:nrow(zzz),(ncol(zzz)/2+1):ncol(zzz)]
+zz <- out$BUGSoutput$sims.list$z # 2000 x 2850 x 2 (nbMCMC x nSquares x nyears)
 sumz <- apply(zz,c(2,3),sum)
 meanz <- apply(zz,c(2,3),sum)/dim(zz)[1]*100
 z_occupied <- (meanz > 25) # 
@@ -524,7 +625,7 @@ ggplot() +
   geom_sf(data = grid, colour = "grey50", fill = "white", lwd = 0.1) + 
   geom_sf(data = ring_occ2, lwd = 0.1, aes(fill = delta)) + 
   geom_sf(data = greece, colour = "grey50", fill = "white",lwd = 0.2) + 
-  scale_fill_gradientn(colours = RColorBrewer::brewer.pal(11,"RdYlGn"),
+  scale_fill_gradientn(colours = RColorBrewer::brewer.pal(15,"RdYlGn"),
                        name = '') + 
   labs(title = '') +
   xlab("") + ylab("") + 
@@ -598,7 +699,6 @@ ggplot() +
   theme(legend.position = "bottom")
 ggsave(here::here("figures","mpamonksealsdetails.png"), dpi = 600)
 ```
-
 
 # Focus on pups
 
@@ -718,161 +818,110 @@ dim(y)
 range(y)
 ```
 
-Load `nimble` package:
+We specify our model in BUGS language.
 ```{r}
-library(nimble)
-```
+sink(here::here("codes","dynoccctpups.jags"))
+cat("
+model{
 
-We specify our model:
-```{r}
-model <- nimbleCode({
+# Specify priors
+mupsi ~ dnorm(-5,1)
+for(i in 1:nsite){
+cloglog(psi[i]) <- mupsi + offset[i]
+}
 
-  # occupancy
-  mupsi ~ dnorm(-5,sd = 1)
-  for(i in 1:nsite){
-    cloglog(psi[i]) <- mupsi + offset[i]
-  }
+sdgam ~ dunif(0,10)
+taugam <- pow(sdgam,-2)
+sdeps ~ dunif(0,10)
+taueps <- pow(sdeps,-2)
+sdp ~ dunif(0,10)
+taup <- pow(sdp,-2)
 
-  # detection
-  sdp ~ dunif(0,10)
-  for(i in 1:nyear){
-    muptemp[i] ~ dunif(0,1)
-    logit(mup[i]) <- muptemp[i]
-  }
-  for(i in 1:nsite){
-    lp[i] ~ dnorm(0, sd = sdp)
-    for(t in 1:nyear){
-      logit(p[i,t]) <- mup[t] + lp[i]
-    }
-  }
-  
-  # priors for mean extinction/colonization
-  mueps ~ dnorm(-5, sd = 1)
-  mugam ~ dnorm(-5, sd = 1)
-  
-  # process model
-  for(i in 1:nsite){
-    z[i,1] ~ dbern(psi[i])
-    cloglog(gamma[i]) <- mugam + offset[i]
-    cloglog(eps[i]) <- mueps + offset[i]
-    z[i,2] ~ dbern(z[i,1] * (1 - eps[i]) + (1 - z[i,1]) * gamma[i])
-  }
-  
-  # observation model
-  for (i in 1:nsite){
-    for (k in 1:nyear){
-      y[i,k] ~ dbin(z[i,k] * p[i,k],5)
-    }
-  }
-})
+for(i in 1:nyear){
+    mup.prob[i] ~ dunif(0,1)
+    logit(mup[i]) <- mup.prob[i]
+}
+
+for(i in 1:nsite){
+    lp[i] ~ dnorm(0,taup)
+        for(t in 1:nyear){
+            logit(p[i,t]) <- mup[t] + lp[i]
+      }
+}
+
+mueps ~ dnorm(-5,1)
+mugam ~ dnorm(-5,1)
+
+# Ecological submodel: Define state conditional on parameters
+for(i in 1:nsite){
+   z[i,1] ~ dbern(psi[i])
+   leps[i] ~ dnorm(0,taueps)
+   lgam[i] ~ dnorm(0,taugam)
+   cloglog(gamma[i]) <- mugam + lgam[i] + offset[i]
+   cloglog(eps[i]) <- mueps + leps[i] + offset[i]
+   muZ[i,2] <- z[i,1] * (1-eps[i]) + (1-z[i,1]) * gamma[i]
+   z[i,2] ~ dbern(muZ[i,2])
+}
+
+# Observation model
+for (i in 1:nsite){
+		for (k in 1:nyear){
+			y[i,k] ~ dbin(muy[i,k],5)
+			muy[i,k] <- z[i,k]*p[i,k]
+		} #k
+} #i
+
+}
+", fill = TRUE)
+sink()
 ```
 
 Specify data, initial values, parameters to be monitored and various MCMC details:
 ```{r}
 # data
-offset <- log(as.numeric(grid$areakm2))
-win.data <- list(y = y)
-win.constants <- list(nsite = dim(y)[1], 
-                      nyear = dim(y)[2], 
-                      offset = offset)
+offset = log(as.numeric(grid$areakm2))
+win.data <- list(y = y, nsite = dim(y)[1], nyear = dim(y)[2], offset = offset)
 
 # initial values
 zst <- cbind(as.numeric(y1 > 0), as.numeric(y2 > 0)) # observed occurrence as inits for z 
-inits <- function() {list(z = zst, 
-                          mueps = -4, 
-                          mugam = -4, 
-                          mupsi = -4,
-                          sdp = runif(1,1,9), 
-                          muptemp = rep(0,dim(y)[1]),
-                          eps = rep(0.5,dim(y)[1]),
-                          gamma = rep(0.5,dim(y)[1]),
-                          psi = rep(0.5,dim(y)[1]),
-                          lp = rep(0,dim(y)[1]),
-                          mup = rep(0,dim(y)[2]))}
+inits <- function() {list(z = zst, sdp = runif(1,1,9), sdgam = runif(1,1,9), sdeps = runif(1,1,9))}
+
+# parameters monitored
+params <- c("psi","sdgam","sdeps","sdp","mup","lp","mugam","lgam","mueps","leps","z")
 
 # MCMC settings
-ni <- 15000
-nb <- 5000
+ni <- 25000
+nb <- 10000
 nc <- 2
 ```
 
-Create model as a R object: 
-```{r}
-survival <- nimbleModel(code = model,
-                        data = win.data,
-                        constants = win.constants,
-                        inits = inits(),
-                        calculate = FALSE)
-#survival$initializeInfo()
-#survival$calculate()
-```
-
-Go through `nimble` workflow:
-```{r}
-# compile model
-Csurvival <- compileNimble(survival)
-
-# create a MCMC configuration
-survivalConf <- configureMCMC(survival, 
-                              useConjugacy = FALSE)
-
-# replace RW samplers by slice sampler for standard deviation of random effects on detection
-survivalConf$removeSamplers(c('sdp'))
-survivalConf$addSampler(target = c('sdp'),
-                        type = 'slice')
-
-# add some parameters to monitor
-survivalConf$addMonitors(c("lp","z","mupsi","mup"))
-
-# create MCMC function and compile it
-survivalMCMC <- buildMCMC(survivalConf)
-CsurvivalMCMC <- compileNimble(survivalMCMC, project = survival)
-```
-
-Run `nimble`:
-```{r eval=TRUE}
+Run JAGS from R:
+```{r eval=FALSE}
+library(R2jags)
 ptm <- proc.time()
-out <- runMCMC(mcmc = CsurvivalMCMC,
-               niter = ni,
-               nburnin = nb,
-               nchains = nc)
+out <- jags(data = win.data, inits = inits, parameters.to.save = params, model.file = here::here("codes","dynoccctpups.jags"), n.chains = nc, n.iter = ni, n.burnin = nb)
 x <- proc.time() -  ptm
-save(out, x, file = here::here("models","monksealscloglogpups-nimble.RData"))
+save(out, x, file = here::here("models","monksealscloglogpups.RData"))
 ```
 
-The code above takes some time to run. I ran it, saved the results and use them from here:
+The code above takes some time to run. I run it once, saved the results and use them from here:
 ```{r}
-load(here::here("models","monksealscloglogpups-nimble.RData"))
-out_backup <- out
-```
-
-Check convergence:
-```{r}
-library(MCMCvis)
-MCMCtrace(object = out,
-          pdf = FALSE,
-          ind = TRUE,
-          Rhat = TRUE, # add Rhat
-          n.eff = TRUE, # add eff sample size
-          params = c("mupsi","sdp",
-                     "mup","mugam","mueps"))
+load(here::here("models","monksealscloglogpups.RData"))
 ```
 
 Print results:
-```{r, eval = TRUE}
-out <- rbind(out$chain1, out$chain2)
-out %>%
+```{r}
+out$BUGSoutput$sims.matrix %>%
   as_tibble() %>%
   pivot_longer(cols = everything(),  values_to = "value", names_to = "parameter") %>%
   filter(str_detect(parameter, "mu") | str_detect(parameter, "sd")) %>%
-  filter(str_detect(parameter, "muptemp", negate = TRUE)) %>%
   group_by(parameter) %>%
   summarize(median = median(value),
             lci = quantile(value, probs = 2.5/100),
             uci = quantile(value, probs = 97.5/100))
 ```
 
-Check out the number of occupied UTM squares by the species over time. First work out the naive occupancy, that is the number of sites that were observed occupied over the two periods:
+Check out the number of occupied UTM squares by the species over time. First the naive occupancy, that is the number of sites that were observed occupied over the two periods:
 ```{r}
 naiveocc <- rep(NA,2) 
 for (i in 1:2){
@@ -883,10 +932,7 @@ naiveocc
 
 Now the estimated occupancy:
 ```{r}
-zzz <- out[,grepl("z", colnames(out))]
-zz <- array(NA, dim = c(nrow(zzz), ncol(zzz)/2, 2))
-zz[,,1] <- zzz[1:nrow(zzz),1:(ncol(zzz)/2)]
-zz[,,2] <- zzz[1:nrow(zzz),(ncol(zzz)/2+1):ncol(zzz)]
+zz <- out$BUGSoutput$sims.list$z
 dim(zz) # 2000 x 2850 x 2 (nbMCMC x nSquares x nyears)
 nbpixocc <- apply(zz,c(1,3),sum) # 2000 x 2
 meannbpixocc <- apply(nbpixocc,2,median)
@@ -925,20 +971,19 @@ occupancy2 %>%
 
 Now display local extinction, colonization and species detection probabilities estimates with credible intervals:
 ```{r}
-epsmean <- icloglog(mean(out[,'mueps']) + mean(offset))
-epsql <- icloglog(mean(out[,'mueps']) + mean(offset) - 2*sd(out[,'mueps']))
-epsqu <- icloglog(mean(out[,'mueps']) + mean(offset) + 2*sd(out[,'mueps']))
+#install.packages("remotes")
+#remotes::install_github("mikemeredith/MMmisc")
+epsmean <- MMmisc::invcloglog(out$BUGSoutput$mean$mueps + mean(offset))
+epsql <- MMmisc::invcloglog(out$BUGSoutput$mean$mueps + mean(offset) - 2*out$BUGSoutput$sd$mueps)
+epsqu <- MMmisc::invcloglog(out$BUGSoutput$mean$mueps + mean(offset) + 2*out$BUGSoutput$sd$mueps)
 
-gammean <- icloglog(mean(out[,'mugam']) + mean(offset))
-gamql <- icloglog(mean(out[,'mugam']) + mean(offset) - 2*sd(out[,'mugam']))
-gamqu <- icloglog(mean(out[,'mugam']) + mean(offset) + 2*sd(out[,'mugam']))
+gammean <- MMmisc::invcloglog(out$BUGSoutput$mean$mugam + mean(offset))
+gamql <- MMmisc::invcloglog(out$BUGSoutput$mean$mugam + mean(offset) - 2*out$BUGSoutput$sd$mugam)
+gamqu <- MMmisc::invcloglog(out$BUGSoutput$mean$mugam + mean(offset) + 2*out$BUGSoutput$sd$mugam)
 
-pmean1 <- plogis(mean(out[,'mup[1]']))
-pmean2 <- plogis(mean(out[,'mup[2]']))
-pqu1 <- plogis(mean(out[,'mup[1]']) + 2*sd(out[,'mup[1]']))
-pql1 <- plogis(mean(out[,'mup[1]']) - 2*sd(out[,'mup[1]']))
-pqu2 <- plogis(mean(out[,'mup[2]']) + 2*sd(out[,'mup[2]']))
-pql2 <- plogis(mean(out[,'mup[2]']) - 2*sd(out[,'mup[2]']))
+pmean <- plogis(out$BUGSoutput$mean$mup)
+pqu <- plogis(out$BUGSoutput$mean$mup + 2*out$BUGSoutput$sd$mup)
+pql <- plogis(out$BUGSoutput$mean$mup - 2*out$BUGSoutput$sd$mup)
 
 eps <- data.frame(
   param = epsmean, 
@@ -951,9 +996,9 @@ gam <- data.frame(
   qup = gamqu)
 
 det <- data.frame(period = c(1,2),
-  param = c(pmean1,pmean2),
-  qlo = c(pql1,pql2),
-  qup = c(pqu1,pqu2))
+  param = pmean,
+  qlo = pql,
+  qup = pqu)
 
 eps
 gam
@@ -962,10 +1007,7 @@ det
 
 Let's map the estimated distribution of monk seals. First, compute realized occupancy per site and per period, and put altogether in a big table:
 ```{r}
-zzz <- out[,grepl("z", colnames(out))]
-zz <- array(NA, dim = c(nrow(zzz), ncol(zzz)/2, 2))
-zz[,,1] <- zzz[1:nrow(zzz),1:(ncol(zzz)/2)]
-zz[,,2] <- zzz[1:nrow(zzz),(ncol(zzz)/2+1):ncol(zzz)]
+zz <- out$BUGSoutput$sims.list$z # 2000 x 2850 x 2 (nbMCMC x nSquares x nyears)
 meanz <- apply(zz,c(2,3),mean)
 dim(meanz)
 toplot <- data.frame(
@@ -1004,10 +1046,7 @@ ggsave(here::here("figures","map2pups.png"),dpi=600)
 
 We'd also like to have two maps of the estimated occupied sites for the two periods. To do so, we say that all squares with prob of occupancy greater than $25\%$ are occupied. This gives the following maps: 
 ```{r}
-zzz <- out[,grepl("z", colnames(out))]
-zz <- array(NA, dim = c(nrow(zzz), ncol(zzz)/2, 2))
-zz[,,1] <- zzz[1:nrow(zzz),1:(ncol(zzz)/2)]
-zz[,,2] <- zzz[1:nrow(zzz),(ncol(zzz)/2+1):ncol(zzz)]
+zz <- out$BUGSoutput$sims.list$z # 2000 x 2850 x 2 (nbMCMC x nSquares x nyears)
 sumz <- apply(zz,c(2,3),sum)
 meanz <- apply(zz,c(2,3),sum)/dim(zz)[1]*100
 z_occupied <- (meanz > 25) # 
@@ -1036,6 +1075,7 @@ left_join(grid,toplot) %>%
   group_by(yearr) %>%
   summarize(total_area = sum(areakm2)) 
 ```
+
 
 We'd like to consider the difference in occupancy probabilities.
 ```{r}
