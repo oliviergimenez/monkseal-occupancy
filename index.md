@@ -284,9 +284,19 @@ model <- nimbleCode({
   # occupancy
   mupsi ~ dnorm(-5,sd = 1)
   for(i in 1:nsite){
-    cloglog(psi[i]) <- mupsi + offset[i]
+    cloglog(psi[i]) <- mupsi + phi[i] + offset[i]
   }
 
+  # ICAR
+  phi[1:nsite] ~ dcar_normal(adj[1:L],
+                             weights[1:L], 
+                             num[1:nsite], 
+                             tau.phi, 
+                             zero_mean = 1) 
+  
+  tau.phi ~ dgamma(1, 0.01) # precision of the ICAR component
+  sigma2.phi <- 1/tau.phi # variance of the ICAR component
+  
   # detection
   sdp ~ dunif(0,10)
   for(i in 1:nyear){
@@ -301,6 +311,7 @@ model <- nimbleCode({
   }
   
   # priors for mean extinction/colonization
+  # preliminary analyses show no heterogeneity in these parameters
   mueps ~ dnorm(-5, sd = 1)
   mugam ~ dnorm(-5, sd = 1)
   
@@ -327,9 +338,15 @@ Specify data, initial values, parameters to be monitored and various MCMC detail
 # data
 offset <- log(as.numeric(grid$areakm2))
 win.data <- list(y = y)
+neighbours <- spdep::poly2nb(pl = grid)
+weigths <- spdep::nb2WB(nb = neighbours)
 win.constants <- list(nsite = dim(y)[1], 
                       nyear = dim(y)[2], 
-                      offset = offset)
+                      offset = offset,
+                      L = length(weigths$weights),        
+                      adj = weigths$adj,
+                      num = weigths$num,
+                      weights = weigths$weights)
 
 # initial values
 zst <- cbind(as.numeric(y1 > 0), as.numeric(y2 > 0)) # observed occurrence as inits for z 
@@ -342,12 +359,14 @@ inits <- function() {list(z = zst,
                           eps = rep(0.5,dim(y)[1]),
                           gamma = rep(0.5,dim(y)[1]),
                           psi = rep(0.5,dim(y)[1]),
+                          phi = rep(0,dim(y)[1]),
                           lp = rep(0,dim(y)[1]),
-                          mup = rep(0,dim(y)[2]))}
+                          mup = rep(0,dim(y)[2]),
+                          tau.phi = .1)}
 
 # MCMC settings
-ni <- 15000
-nb <- 5000
+ni <- 50000
+nb <- 10000
 nc <- 2
 ```
 
@@ -372,38 +391,19 @@ Csurvival <- compileNimble(survival)
 # create a MCMC configuration
 survivalConf <- configureMCMC(survival, 
                               useConjugacy = FALSE)
-```
 
-```
-## ===== Monitors =====
-## thin = 1: mupsi, sdp, muptemp, mueps, mugam
-## ===== Samplers =====
-## RW sampler (2856)
-##   - mupsi
-##   - sdp
-##   - muptemp[]  (2 elements)
-##   - mueps
-##   - mugam
-##   - lp[]  (2850 elements)
-## binary sampler (5700)
-##   - z[]  (5700 elements)
-```
-
-```r
 # replace RW samplers by slice sampler for standard deviation of random effects on detection
 survivalConf$removeSamplers(c('sdp'))
 survivalConf$addSampler(target = c('sdp'),
                         type = 'slice')
 
+survivalConf$removeSamplers(c('tau.phi'))
+survivalConf$addSampler(target = c('tau.phi'),
+                        type = 'slice')
+
 # add some parameters to monitor
 survivalConf$addMonitors(c("lp","z","mupsi","mup"))
-```
 
-```
-## thin = 1: mupsi, sdp, muptemp, mueps, mugam, lp, z, mup
-```
-
-```r
 # create MCMC function and compile it
 survivalMCMC <- buildMCMC(survivalConf)
 CsurvivalMCMC <- compileNimble(survivalMCMC, project = survival)
@@ -416,17 +416,8 @@ ptm <- proc.time()
 out <- runMCMC(mcmc = CsurvivalMCMC, 
                niter = ni,
                nburnin = nb,
-               nchains = nc)
-```
-
-```
-## |-------------|-------------|-------------|-------------|
-## |-------------------------------------------------------|
-## |-------------|-------------|-------------|-------------|
-## |-------------------------------------------------------|
-```
-
-```r
+               nchains = nc,
+               thin = 5)
 x <- proc.time() -  ptm
 save(out, x, file = here::here("models","monksealscloglog-nimble.RData"))
 ```
@@ -438,20 +429,17 @@ load(here::here("models","monksealscloglog-nimble.RData"))
 out_backup <- out
 ```
 
-Check convergence:
-
-```r
-library(MCMCvis)
-MCMCtrace(object = out,
-          pdf = FALSE,
-          ind = TRUE,
-          Rhat = TRUE, # add Rhat
-          n.eff = TRUE, # add eff sample size
-          params = c("mupsi","sdp",
-                     "mup","mugam","mueps"))
-```
-
-![](index_files/figure-html/unnamed-chunk-19-1.png)<!-- -->![](index_files/figure-html/unnamed-chunk-19-2.png)<!-- -->
+<!-- Check convergence: -->
+<!-- ```{r} -->
+<!-- library(MCMCvis) -->
+<!-- MCMCtrace(object = out, -->
+<!--           pdf = FALSE, -->
+<!--           ind = TRUE, -->
+<!--           Rhat = TRUE, # add Rhat -->
+<!--           n.eff = TRUE, # add eff sample size -->
+<!--           params = c("mupsi","sdp", -->
+<!--                      "mup","mugam","mueps")) -->
+<!-- ``` -->
 
 Print results:
 
@@ -470,7 +458,7 @@ out %>%
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["parameter"],"name":[1],"type":["chr"],"align":["left"]},{"label":["median"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["lci"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["uci"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"mueps","2":"-6.5020375","3":"-7.0600304","4":"-6.0781270"},{"1":"mugam","2":"-7.3147531","3":"-7.5739128","4":"-7.0984725"},{"1":"mup[1]","2":"0.5077458","3":"0.5002912","4":"0.5392629"},{"1":"mup[2]","2":"0.5101686","3":"0.5003561","4":"0.5539838"},{"1":"mupsi","2":"-6.4137671","3":"-6.5354151","4":"-6.2886941"},{"1":"sdp","2":"2.7750334","3":"2.5463384","4":"3.0767649"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["parameter"],"name":[1],"type":["chr"],"align":["left"]},{"label":["median"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["lci"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["uci"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"mueps","2":"-6.5576859","3":"-7.1300851","4":"-6.1247350"},{"1":"mugam","2":"-7.3741475","3":"-7.6287481","4":"-7.1545389"},{"1":"mup[1]","2":"0.5072076","3":"0.5002543","4":"0.5398075"},{"1":"mup[2]","2":"0.5110623","3":"0.5003972","4":"0.5587187"},{"1":"mupsi","2":"-7.5635262","3":"-8.1207502","4":"-7.1034722"},{"1":"sdp","2":"2.7829146","3":"2.5341113","4":"3.0686697"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -501,7 +489,7 @@ dim(zz) # 2000 x 2850 x 2 (nbMCMC x nSquares x nyears)
 ```
 
 ```
-## [1] 20000  2850     2
+## [1] 16000  2850     2
 ```
 
 ```r
@@ -530,7 +518,7 @@ occupancy2
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["period"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["occ"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["quantlower"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["quantupper"],"name":[4],"type":["dbl"],"align":["right"]},{"label":["Occupancy"],"name":[5],"type":["chr"],"align":["left"]}],"data":[{"1":"1","2":"271","3":"NA","4":"NA","5":"naive"},{"1":"2","2":"343","3":"NA","4":"NA","5":"naive"},{"1":"1","2":"380","3":"356","4":"409","5":"estimated"},{"1":"2","2":"466","3":"441","4":"493","5":"estimated"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["period"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["occ"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["quantlower"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["quantupper"],"name":[4],"type":["dbl"],"align":["right"]},{"label":["Occupancy"],"name":[5],"type":["chr"],"align":["left"]}],"data":[{"1":"1","2":"271","3":"NA","4":"NA","5":"naive"},{"1":"2","2":"343","3":"NA","4":"NA","5":"naive"},{"1":"1","2":"386","3":"363","4":"413","5":"estimated"},{"1":"2","2":"465","3":"440","4":"493","5":"estimated"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -550,7 +538,7 @@ occupancy2 %>%
   labs(x = 'Year', y = 'Number of occupied sites')
 ```
 
-![](index_files/figure-html/unnamed-chunk-24-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-23-1.png)<!-- -->
 
 Now display local extinction, colonization and species detection probabilities estimates with credible intervals:
 
@@ -590,7 +578,7 @@ eps
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["param"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"0.1147116","2":"0.07104224","3":"0.1824576"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["param"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"0.1087929","2":"0.06650713","3":"0.1753197"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -600,7 +588,7 @@ gam
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["param"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"0.05325784","2":"0.04220731","3":"0.06709866"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["param"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"0.05030452","2":"0.03967768","3":"0.06368179"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -610,7 +598,7 @@ det
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["period"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["param"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"1","2":"0.6250094","3":"0.6201418","4":"0.6298518"},{"1":"2","2":"0.6258858","3":"0.6190843","4":"0.6326379"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["period"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["param"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"1","2":"0.6249538","3":"0.6198868","4":"0.6299935"},{"1":"2","2":"0.6262027","3":"0.6186926","4":"0.6336524"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -659,7 +647,7 @@ sum(meanz[,2] > meanz[,1])
 ```
 
 ```
-## [1] 2579
+## [1] 2437
 ```
 
 ```r
@@ -667,7 +655,7 @@ sum(meanz[,2] < meanz[,1])
 ```
 
 ```
-## [1] 110
+## [1] 252
 ```
 
 Then, plot two maps, one for each period:
@@ -691,7 +679,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](index_files/figure-html/unnamed-chunk-28-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-27-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map2.png"), dpi = 600)
@@ -724,7 +712,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](index_files/figure-html/unnamed-chunk-29-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-28-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map3.png"), dpi = 600)
@@ -732,7 +720,7 @@ ggsave(here::here("figures","map3.png"), dpi = 600)
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["yearr"],"name":[1],"type":["chr"],"align":["left"]},{"label":["total_area"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["geometry"],"name":[3],"type":["s_MULTIP"],"align":["right"]}],"data":[{"1":"2000-2007","2":"42288.94","3":"<s_MULTIP>"},{"1":"2013-2020","2":"44334.51","3":"<s_MULTIP>"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["yearr"],"name":[1],"type":["chr"],"align":["left"]},{"label":["total_area"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["geometry"],"name":[3],"type":["s_MULTIP"],"align":["right"]}],"data":[{"1":"2000-2007","2":"39419.28","3":"<s_MULTIP>"},{"1":"2013-2020","2":"44334.51","3":"<s_MULTIP>"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -758,7 +746,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](index_files/figure-html/unnamed-chunk-31-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-30-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map4.png"), dpi = 600)
@@ -821,7 +809,7 @@ ggplot() +
   geom_sf(data = pa, colour = "red", fill = "transparent", lwd = 0.1) 
 ```
 
-![](index_files/figure-html/unnamed-chunk-33-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-32-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpa.png"), dpi = 600)
@@ -841,7 +829,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](index_files/figure-html/unnamed-chunk-34-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-33-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonkseals.png"), dpi = 600)
@@ -883,7 +871,7 @@ ggplot() +
   theme(legend.position = "bottom")
 ```
 
-![](index_files/figure-html/unnamed-chunk-36-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-35-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealsdetails.png"), dpi = 600)
@@ -909,7 +897,7 @@ monkseal %>%
   geom_bar()
 ```
 
-![](index_files/figure-html/unnamed-chunk-38-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-37-1.png)<!-- -->
 
 The sightings are done along the year (all years are pooled together). October gets maximum sightings.
 
@@ -921,7 +909,7 @@ monkseal %>%
   labs(x = NULL)
 ```
 
-![](index_files/figure-html/unnamed-chunk-39-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-38-1.png)<!-- -->
 
 Regarding the observers, we see that the sightings are mostly done by local people, then to a lesser extent tourists, and a few others. 
 
@@ -935,7 +923,7 @@ monkseal %>%
   labs(y = NULL, x = NULL)
 ```
 
-![](index_files/figure-html/unnamed-chunk-40-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-39-1.png)<!-- -->
 
 Last, regarding where the seals were when they were spotted, we see that the sightings are mostly on beach (f). 
 
@@ -949,7 +937,7 @@ monkseal %>%
   labs(y = NULL, x = NULL)
 ```
 
-![](index_files/figure-html/unnamed-chunk-41-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-40-1.png)<!-- -->
 
 Map counts.
 
@@ -975,7 +963,7 @@ ggplot() +
   labs(title = '', x = NULL, y = NULL)
 ```
 
-![](index_files/figure-html/unnamed-chunk-42-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-41-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map1pups.png"),dpi=600)
@@ -1059,9 +1047,19 @@ model <- nimbleCode({
   # occupancy
   mupsi ~ dnorm(-5,sd = 1)
   for(i in 1:nsite){
-    cloglog(psi[i]) <- mupsi + offset[i]
+    cloglog(psi[i]) <- mupsi + phi[i] + offset[i]
   }
 
+  # ICAR
+  phi[1:nsite] ~ dcar_normal(adj[1:L],
+                             weights[1:L], 
+                             num[1:nsite], 
+                             tau.phi, 
+                             zero_mean = 1) 
+  
+  tau.phi ~ dgamma(1, 0.01) # precision of the ICAR component
+  sigma2.phi <- 1/tau.phi # variance of the ICAR component
+  
   # detection
   sdp ~ dunif(0,10)
   for(i in 1:nyear){
@@ -1076,6 +1074,7 @@ model <- nimbleCode({
   }
   
   # priors for mean extinction/colonization
+  # preliminary analyses show no heterogeneity in these parameters
   mueps ~ dnorm(-5, sd = 1)
   mugam ~ dnorm(-5, sd = 1)
   
@@ -1102,9 +1101,15 @@ Specify data, initial values, parameters to be monitored and various MCMC detail
 # data
 offset <- log(as.numeric(grid$areakm2))
 win.data <- list(y = y)
+neighbours <- spdep::poly2nb(pl = grid)
+weigths <- spdep::nb2WB(nb = neighbours)
 win.constants <- list(nsite = dim(y)[1], 
                       nyear = dim(y)[2], 
-                      offset = offset)
+                      offset = offset,
+                      L = length(weigths$weights),        
+                      adj = weigths$adj,
+                      num = weigths$num,
+                      weights = weigths$weights)
 
 # initial values
 zst <- cbind(as.numeric(y1 > 0), as.numeric(y2 > 0)) # observed occurrence as inits for z 
@@ -1117,12 +1122,14 @@ inits <- function() {list(z = zst,
                           eps = rep(0.5,dim(y)[1]),
                           gamma = rep(0.5,dim(y)[1]),
                           psi = rep(0.5,dim(y)[1]),
+                          phi = rep(0,dim(y)[1]),
                           lp = rep(0,dim(y)[1]),
-                          mup = rep(0,dim(y)[2]))}
+                          mup = rep(0,dim(y)[2]),
+                          tau.phi = .1)}
 
 # MCMC settings
-ni <- 15000
-nb <- 5000
+ni <- 50000
+nb <- 10000
 nc <- 2
 ```
 
@@ -1147,38 +1154,19 @@ Csurvival <- compileNimble(survival)
 # create a MCMC configuration
 survivalConf <- configureMCMC(survival, 
                               useConjugacy = FALSE)
-```
 
-```
-## ===== Monitors =====
-## thin = 1: mupsi, sdp, muptemp, mueps, mugam
-## ===== Samplers =====
-## RW sampler (2856)
-##   - mupsi
-##   - sdp
-##   - muptemp[]  (2 elements)
-##   - mueps
-##   - mugam
-##   - lp[]  (2850 elements)
-## binary sampler (5700)
-##   - z[]  (5700 elements)
-```
-
-```r
 # replace RW samplers by slice sampler for standard deviation of random effects on detection
 survivalConf$removeSamplers(c('sdp'))
 survivalConf$addSampler(target = c('sdp'),
                         type = 'slice')
 
+survivalConf$removeSamplers(c('tau.phi'))
+survivalConf$addSampler(target = c('tau.phi'),
+                        type = 'slice')
+
 # add some parameters to monitor
 survivalConf$addMonitors(c("lp","z","mupsi","mup"))
-```
 
-```
-## thin = 1: mupsi, sdp, muptemp, mueps, mugam, lp, z, mup
-```
-
-```r
 # create MCMC function and compile it
 survivalMCMC <- buildMCMC(survivalConf)
 CsurvivalMCMC <- compileNimble(survivalMCMC, project = survival)
@@ -1191,17 +1179,8 @@ ptm <- proc.time()
 out <- runMCMC(mcmc = CsurvivalMCMC,
                niter = ni,
                nburnin = nb,
-               nchains = nc)
-```
-
-```
-## |-------------|-------------|-------------|-------------|
-## |-------------------------------------------------------|
-## |-------------|-------------|-------------|-------------|
-## |-------------------------------------------------------|
-```
-
-```r
+               nchains = nc,
+               thin = 5)
 x <- proc.time() -  ptm
 save(out, x, file = here::here("models","monksealscloglogpups-nimble.RData"))
 ```
@@ -1213,20 +1192,17 @@ load(here::here("models","monksealscloglogpups-nimble.RData"))
 out_backup <- out
 ```
 
-Check convergence:
-
-```r
-library(MCMCvis)
-MCMCtrace(object = out,
-          pdf = FALSE,
-          ind = TRUE,
-          Rhat = TRUE, # add Rhat
-          n.eff = TRUE, # add eff sample size
-          params = c("mupsi","sdp",
-                     "mup","mugam","mueps"))
-```
-
-![](index_files/figure-html/unnamed-chunk-51-1.png)<!-- -->![](index_files/figure-html/unnamed-chunk-51-2.png)<!-- -->
+<!-- Check convergence: -->
+<!-- ```{r} -->
+<!-- library(MCMCvis) -->
+<!-- MCMCtrace(object = out, -->
+<!--           pdf = FALSE, -->
+<!--           ind = TRUE, -->
+<!--           Rhat = TRUE, # add Rhat -->
+<!--           n.eff = TRUE, # add eff sample size -->
+<!--           params = c("mupsi","sdp", -->
+<!--                      "mup","mugam","mueps")) -->
+<!-- ``` -->
 
 Print results:
 
@@ -1245,7 +1221,7 @@ out %>%
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["parameter"],"name":[1],"type":["chr"],"align":["left"]},{"label":["median"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["lci"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["uci"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"mueps","2":"-5.5482341","3":"-6.6856918","4":"-4.8072521"},{"1":"mugam","2":"-8.2585233","3":"-8.5713134","4":"-7.9751905"},{"1":"mup[1]","2":"0.5588832","3":"0.5027983","4":"0.7128727"},{"1":"mup[2]","2":"0.5287616","3":"0.5011437","4":"0.6519960"},{"1":"mupsi","2":"-8.6241512","3":"-8.9971138","4":"-8.2885725"},{"1":"sdp","2":"2.3675738","3":"1.9000035","4":"3.0187407"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["parameter"],"name":[1],"type":["chr"],"align":["left"]},{"label":["median"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["lci"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["uci"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"mueps","2":"-5.6186822","3":"-6.8368511","4":"-4.8470949"},{"1":"mugam","2":"-8.2679461","3":"-8.5862426","4":"-7.9877090"},{"1":"mup[1]","2":"0.5579125","3":"0.5022420","4":"0.7092396"},{"1":"mup[2]","2":"0.5310202","3":"0.5010515","4":"0.6540432"},{"1":"mupsi","2":"-8.6726750","3":"-9.0694691","4":"-8.3267810"},{"1":"sdp","2":"2.4144845","3":"1.9012811","4":"3.0624609"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -1274,7 +1250,7 @@ dim(zz) # 2000 x 2850 x 2 (nbMCMC x nSquares x nyears)
 ```
 
 ```
-## [1] 20000  2850     2
+## [1] 16000  2850     2
 ```
 
 ```r
@@ -1303,7 +1279,7 @@ occupancy2
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["period"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["occ"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["quantlower"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["quantupper"],"name":[4],"type":["dbl"],"align":["right"]},{"label":["Occupancy"],"name":[5],"type":["chr"],"align":["left"]}],"data":[{"1":"1","2":"30","3":"NA","4":"NA","5":"naive"},{"1":"2","2":"68","3":"NA","4":"NA","5":"naive"},{"1":"1","2":"42","3":"34","4":"52","5":"estimated"},{"1":"2","2":"89","3":"79","4":"103","5":"estimated"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["period"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["occ"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["quantlower"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["quantupper"],"name":[4],"type":["dbl"],"align":["right"]},{"label":["Occupancy"],"name":[5],"type":["chr"],"align":["left"]}],"data":[{"1":"1","2":"30","3":"NA","4":"NA","5":"naive"},{"1":"2","2":"68","3":"NA","4":"NA","5":"naive"},{"1":"1","2":"42","3":"35","4":"53","5":"estimated"},{"1":"2","2":"90","3":"79","4":"104","5":"estimated"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -1321,7 +1297,7 @@ occupancy2 %>%
   ylab('Number of occupied sites')
 ```
 
-![](index_files/figure-html/unnamed-chunk-56-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-54-1.png)<!-- -->
 
 Now display local extinction, colonization and species detection probabilities estimates with credible intervals:
 
@@ -1361,7 +1337,7 @@ eps
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["param"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"0.2625761","2":"0.109241","3":"0.5515691"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["param"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"0.2465728","2":"0.09668383","3":"0.5453926"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -1371,7 +1347,7 @@ gam
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["param"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"0.02106307","2":"0.01564776","3":"0.02832534"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["param"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[3],"type":["dbl"],"align":["right"]}],"data":[{"1":"0.02087255","2":"0.01541119","3":"0.02824134"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -1381,7 +1357,7 @@ det
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["period"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["param"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"1","2":"0.6397102","3":"0.6119784","4":"0.6665399"},{"1":"2","2":"0.6322098","3":"0.6132193","4":"0.6507989"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["period"],"name":[1],"type":["dbl"],"align":["right"]},{"label":["param"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["qlo"],"name":[3],"type":["dbl"],"align":["right"]},{"label":["qup"],"name":[4],"type":["dbl"],"align":["right"]}],"data":[{"1":"1","2":"0.6394057","3":"0.6120799","4":"0.6658574"},{"1":"2","2":"0.6325905","3":"0.6133485","4":"0.6514192"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -1422,7 +1398,7 @@ sum(meanz[,2] == meanz[,1])
 ```
 
 ```
-## [1] 12
+## [1] 13
 ```
 
 ```r
@@ -1430,7 +1406,7 @@ sum(meanz[,2] > meanz[,1])
 ```
 
 ```
-## [1] 2820
+## [1] 2819
 ```
 
 ```r
@@ -1461,7 +1437,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](index_files/figure-html/unnamed-chunk-60-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-58-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map2pups.png"),dpi=600)
@@ -1495,7 +1471,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](index_files/figure-html/unnamed-chunk-61-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-59-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map3pups.png"),dpi=600)
@@ -1503,7 +1479,7 @@ ggsave(here::here("figures","map3pups.png"),dpi=600)
 
 <div data-pagedtable="false">
   <script data-pagedtable-source type="application/json">
-{"columns":[{"label":["yearr"],"name":[1],"type":["chr"],"align":["left"]},{"label":["total_area"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["geometry"],"name":[3],"type":["s_MULTIP"],"align":["right"]}],"data":[{"1":"2000-2007","2":"2992.977","3":"<s_MULTIP>"},{"1":"2013-2020","2":"8431.928","3":"<s_MULTIP>"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
+{"columns":[{"label":["yearr"],"name":[1],"type":["chr"],"align":["left"]},{"label":["total_area"],"name":[2],"type":["dbl"],"align":["right"]},{"label":["geometry"],"name":[3],"type":["s_MULTIP"],"align":["right"]}],"data":[{"1":"2000-2007","2":"2992.977","3":"<s_MULTIP>"},{"1":"2013-2020","2":"8531.926","3":"<s_MULTIP>"}],"options":{"columns":{"min":{},"max":[10]},"rows":{"min":[10],"max":[10]},"pages":{}}}
   </script>
 </div>
 
@@ -1527,7 +1503,7 @@ ggplot() +
         legend.key.size = unit(0.5, "cm"))
 ```
 
-![](index_files/figure-html/unnamed-chunk-63-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-61-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","map4pups.png"),dpi=600)
@@ -1547,7 +1523,7 @@ ggplot() +
   theme(legend.position = "none")
 ```
 
-![](index_files/figure-html/unnamed-chunk-64-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-62-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealspups.png"),dpi=600)
@@ -1589,7 +1565,7 @@ ggplot() +
   theme(legend.position = "bottom")
 ```
 
-![](index_files/figure-html/unnamed-chunk-66-1.png)<!-- -->
+![](index_files/figure-html/unnamed-chunk-64-1.png)<!-- -->
 
 ```r
 ggsave(here::here("figures","mpamonksealsdetailspups.png"),dpi=600)

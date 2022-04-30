@@ -201,9 +201,19 @@ model <- nimbleCode({
   # occupancy
   mupsi ~ dnorm(-5,sd = 1)
   for(i in 1:nsite){
-    cloglog(psi[i]) <- mupsi + offset[i]
+    cloglog(psi[i]) <- mupsi + phi[i] + offset[i]
   }
 
+  # ICAR
+  phi[1:nsite] ~ dcar_normal(adj[1:L],
+                             weights[1:L], 
+                             num[1:nsite], 
+                             tau.phi, 
+                             zero_mean = 1) 
+  
+  tau.phi ~ dgamma(1, 0.01) # precision of the ICAR component
+  sigma2.phi <- 1/tau.phi # variance of the ICAR component
+  
   # detection
   sdp ~ dunif(0,10)
   for(i in 1:nyear){
@@ -244,9 +254,15 @@ Specify data, initial values, parameters to be monitored and various MCMC detail
 # data
 offset <- log(as.numeric(grid$areakm2))
 win.data <- list(y = y)
+neighbours <- spdep::poly2nb(pl = grid)
+weigths <- spdep::nb2WB(nb = neighbours)
 win.constants <- list(nsite = dim(y)[1], 
                       nyear = dim(y)[2], 
-                      offset = offset)
+                      offset = offset,
+                      L = length(weigths$weights),        
+                      adj = weigths$adj,
+                      num = weigths$num,
+                      weights = weigths$weights)
 
 # initial values
 zst <- cbind(as.numeric(y1 > 0), as.numeric(y2 > 0)) # observed occurrence as inits for z 
@@ -259,17 +275,19 @@ inits <- function() {list(z = zst,
                           eps = rep(0.5,dim(y)[1]),
                           gamma = rep(0.5,dim(y)[1]),
                           psi = rep(0.5,dim(y)[1]),
+                          phi = rep(0,dim(y)[1]),
                           lp = rep(0,dim(y)[1]),
-                          mup = rep(0,dim(y)[2]))}
+                          mup = rep(0,dim(y)[2]),
+                          tau.phi = .1)}
 
 # MCMC settings
-ni <- 15000
-nb <- 5000
+ni <- 50000
+nb <- 10000
 nc <- 2
 ```
 
 Create model as a R object: 
-```{r}
+```{r eval = FALSE}
 survival <- nimbleModel(code = model,
                         data = win.data,
                         constants = win.constants,
@@ -280,7 +298,7 @@ survival <- nimbleModel(code = model,
 ```
 
 Go through `nimble` workflow:
-```{r}
+```{r eval = FALSE}
 # compile model
 Csurvival <- compileNimble(survival)
 
@@ -293,6 +311,10 @@ survivalConf$removeSamplers(c('sdp'))
 survivalConf$addSampler(target = c('sdp'),
                         type = 'slice')
 
+survivalConf$removeSamplers(c('tau.phi'))
+survivalConf$addSampler(target = c('tau.phi'),
+                        type = 'slice')
+
 # add some parameters to monitor
 survivalConf$addMonitors(c("lp","z","mupsi","mup"))
 
@@ -302,12 +324,13 @@ CsurvivalMCMC <- compileNimble(survivalMCMC, project = survival)
 ```
 
 Run `nimble`:
-```{r eval=TRUE}
+```{r eval=FALSE}
 ptm <- proc.time()
 out <- runMCMC(mcmc = CsurvivalMCMC, 
                niter = ni,
                nburnin = nb,
-               nchains = nc)
+               nchains = nc,
+               thin = 5)
 x <- proc.time() -  ptm
 save(out, x, file = here::here("models","monksealscloglog-nimble.RData"))
 ```
@@ -318,17 +341,17 @@ load(here::here("models","monksealscloglog-nimble.RData"))
 out_backup <- out
 ```
 
-Check convergence:
-```{r}
-library(MCMCvis)
-MCMCtrace(object = out,
-          pdf = FALSE,
-          ind = TRUE,
-          Rhat = TRUE, # add Rhat
-          n.eff = TRUE, # add eff sample size
-          params = c("mupsi","sdp",
-                     "mup","mugam","mueps"))
-```
+<!-- Check convergence: -->
+<!-- ```{r} -->
+<!-- library(MCMCvis) -->
+<!-- MCMCtrace(object = out, -->
+<!--           pdf = FALSE, -->
+<!--           ind = TRUE, -->
+<!--           Rhat = TRUE, # add Rhat -->
+<!--           n.eff = TRUE, # add eff sample size -->
+<!--           params = c("mupsi","sdp", -->
+<!--                      "mup","mugam","mueps")) -->
+<!-- ``` -->
 
 Print results:
 ```{r, eval = TRUE}
@@ -730,9 +753,19 @@ model <- nimbleCode({
   # occupancy
   mupsi ~ dnorm(-5,sd = 1)
   for(i in 1:nsite){
-    cloglog(psi[i]) <- mupsi + offset[i]
+    cloglog(psi[i]) <- mupsi + phi[i] + offset[i]
   }
 
+  # ICAR
+  phi[1:nsite] ~ dcar_normal(adj[1:L],
+                             weights[1:L], 
+                             num[1:nsite], 
+                             tau.phi, 
+                             zero_mean = 1) 
+  
+  tau.phi ~ dgamma(1, 0.01) # precision of the ICAR component
+  sigma2.phi <- 1/tau.phi # variance of the ICAR component
+  
   # detection
   sdp ~ dunif(0,10)
   for(i in 1:nyear){
@@ -747,6 +780,7 @@ model <- nimbleCode({
   }
   
   # priors for mean extinction/colonization
+  # preliminary analyses show no heterogeneity in these parameters
   mueps ~ dnorm(-5, sd = 1)
   mugam ~ dnorm(-5, sd = 1)
   
@@ -772,9 +806,15 @@ Specify data, initial values, parameters to be monitored and various MCMC detail
 # data
 offset <- log(as.numeric(grid$areakm2))
 win.data <- list(y = y)
+neighbours <- spdep::poly2nb(pl = grid)
+weigths <- spdep::nb2WB(nb = neighbours)
 win.constants <- list(nsite = dim(y)[1], 
                       nyear = dim(y)[2], 
-                      offset = offset)
+                      offset = offset,
+                      L = length(weigths$weights),        
+                      adj = weigths$adj,
+                      num = weigths$num,
+                      weights = weigths$weights)
 
 # initial values
 zst <- cbind(as.numeric(y1 > 0), as.numeric(y2 > 0)) # observed occurrence as inits for z 
@@ -787,17 +827,19 @@ inits <- function() {list(z = zst,
                           eps = rep(0.5,dim(y)[1]),
                           gamma = rep(0.5,dim(y)[1]),
                           psi = rep(0.5,dim(y)[1]),
+                          phi = rep(0,dim(y)[1]),
                           lp = rep(0,dim(y)[1]),
-                          mup = rep(0,dim(y)[2]))}
+                          mup = rep(0,dim(y)[2]),
+                          tau.phi = .1)}
 
 # MCMC settings
-ni <- 15000
-nb <- 5000
+ni <- 50000
+nb <- 10000
 nc <- 2
 ```
 
 Create model as a R object: 
-```{r}
+```{r eval = FALSE}
 survival <- nimbleModel(code = model,
                         data = win.data,
                         constants = win.constants,
@@ -808,7 +850,7 @@ survival <- nimbleModel(code = model,
 ```
 
 Go through `nimble` workflow:
-```{r}
+```{r eval = FALSE}
 # compile model
 Csurvival <- compileNimble(survival)
 
@@ -821,6 +863,10 @@ survivalConf$removeSamplers(c('sdp'))
 survivalConf$addSampler(target = c('sdp'),
                         type = 'slice')
 
+survivalConf$removeSamplers(c('tau.phi'))
+survivalConf$addSampler(target = c('tau.phi'),
+                        type = 'slice')
+
 # add some parameters to monitor
 survivalConf$addMonitors(c("lp","z","mupsi","mup"))
 
@@ -830,12 +876,13 @@ CsurvivalMCMC <- compileNimble(survivalMCMC, project = survival)
 ```
 
 Run `nimble`:
-```{r eval=TRUE}
+```{r eval=FALSE}
 ptm <- proc.time()
 out <- runMCMC(mcmc = CsurvivalMCMC,
                niter = ni,
                nburnin = nb,
-               nchains = nc)
+               nchains = nc,
+               thin = 5)
 x <- proc.time() -  ptm
 save(out, x, file = here::here("models","monksealscloglogpups-nimble.RData"))
 ```
@@ -846,17 +893,17 @@ load(here::here("models","monksealscloglogpups-nimble.RData"))
 out_backup <- out
 ```
 
-Check convergence:
-```{r}
-library(MCMCvis)
-MCMCtrace(object = out,
-          pdf = FALSE,
-          ind = TRUE,
-          Rhat = TRUE, # add Rhat
-          n.eff = TRUE, # add eff sample size
-          params = c("mupsi","sdp",
-                     "mup","mugam","mueps"))
-```
+<!-- Check convergence: -->
+<!-- ```{r} -->
+<!-- library(MCMCvis) -->
+<!-- MCMCtrace(object = out, -->
+<!--           pdf = FALSE, -->
+<!--           ind = TRUE, -->
+<!--           Rhat = TRUE, # add Rhat -->
+<!--           n.eff = TRUE, # add eff sample size -->
+<!--           params = c("mupsi","sdp", -->
+<!--                      "mup","mugam","mueps")) -->
+<!-- ``` -->
 
 Print results:
 ```{r, eval = TRUE}
