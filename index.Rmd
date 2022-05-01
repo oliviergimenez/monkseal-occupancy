@@ -490,7 +490,7 @@ ggplot() +
   geom_sf(data = greece, colour = "grey50", fill = "white",lwd = 0.2) + 
   scale_fill_viridis(
     name = 'Pr(occupancy)', 
-    direction = -1,
+    direction = 1,
     alpha = 0.7) + 
   labs(title = '') +
   xlab("") + ylab("") + 
@@ -733,7 +733,7 @@ new_y <- NULL
 for (i in 1:dim(y)[3]){ # loop over years
   new_y <- cbind(new_y,apply(y[,1:5,i],1,sum))
 }
-new_y <- (new_y > 0) 
+new_y <- (new_y > 0)
 y1 <- apply(new_y[,1:8],1,sum)
 y2 <- apply(new_y[,9:16],1,sum)
 y <- cbind(y1,y2)
@@ -795,7 +795,7 @@ model <- nimbleCode({
   # observation model
   for (i in 1:nsite){
     for (k in 1:nyear){
-      y[i,k] ~ dbin(z[i,k] * p[i,k],5)
+      y[i,k] ~ dbin(z[i,k] * p[i,k],8)
     }
   }
 })
@@ -1038,7 +1038,7 @@ ggplot() +
   geom_sf(data = greece, colour = "grey50", fill = "white",lwd = 0.2) + 
   scale_fill_viridis(
     name = 'Pr(occupancy)', 
-    direction = -1,
+    direction = 1,
     alpha = 0.7) + 
   labs(title = '', x = NULL, y = NULL) +
   facet_wrap(~ yearr, ncol = 2) + 
