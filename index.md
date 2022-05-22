@@ -661,15 +661,31 @@ sum(meanz[,2] < meanz[,1])
 Then, plot two maps, one for each period:
 
 ```r
+# ggplot() + 
+#   geom_sf(data = greece, colour = "grey50", fill = "white") + 
+#   geom_sf(data = grid, colour = "grey50", fill = "white", lwd = 0.1) + 
+#   geom_sf(data = ring_occ, lwd = 0.1, aes(fill = as.numeric(meanz))) + 
+#   geom_sf(data = greece, colour = "grey50", fill = "white",lwd = 0.2) + 
+#   scale_fill_viridis(
+#     name = 'Pr(occupancy)', 
+#     direction = 1,
+#     alpha = 0.7) + 
+#   labs(title = '') +
+#   xlab("") + ylab("") + 
+#   facet_wrap(~ yearr, ncol = 2) + 
+#   theme(legend.position = 'bottom', 
+#         legend.title = element_text(size=8), 
+#         legend.text = element_text(size=8),
+#         legend.key.size = unit(0.5, "cm"))
 ggplot() + 
   geom_sf(data = greece, colour = "grey50", fill = "white") + 
   geom_sf(data = grid, colour = "grey50", fill = "white", lwd = 0.1) + 
   geom_sf(data = ring_occ, lwd = 0.1, aes(fill = as.numeric(meanz))) + 
   geom_sf(data = greece, colour = "grey50", fill = "white",lwd = 0.2) + 
-  scale_fill_viridis(
+  scale_fill_distiller(
     name = 'Pr(occupancy)', 
     direction = 1,
-    alpha = 0.7) + 
+    palette = "Purples") + 
   labs(title = '') +
   xlab("") + ylab("") + 
   facet_wrap(~ yearr, ncol = 2) + 
@@ -1425,10 +1441,10 @@ ggplot() +
   geom_sf(data = grid, colour = "grey50", fill = "white", lwd = 0.1) + 
   geom_sf(data = ring_occ, lwd = 0.1, aes(fill = as.numeric(meanz))) + 
   geom_sf(data = greece, colour = "grey50", fill = "white",lwd = 0.2) + 
-  scale_fill_viridis(
+  scale_fill_distiller(
     name = 'Pr(occupancy)', 
     direction = 1,
-    alpha = 0.7) + 
+    palette = "Purples") + 
   labs(title = '', x = NULL, y = NULL) +
   facet_wrap(~ yearr, ncol = 2) + 
   theme(legend.position = 'bottom', 
